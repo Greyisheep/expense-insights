@@ -1,13 +1,13 @@
 ├── services/
 │   ├── efms-service/                # Expense & File Management (Go)
 │   │   ├── cmd/                      # entrypoint (main.go)
-│   │   ├── configs/                  # service‑specific config
+│   │   ├── configs/                  # service-specific config
 │   │   ├── internal/
 │   │   │   ├── domain/               # entities & value objects
 │   │   │   ├── repository/           # data access layer
-│   │   │   ├── service/              # use‑case logic
+│   │   │   ├── service/              # use-case logic
 │   │   │   ├── handler/              # HTTP/gRPC handlers
-│   │   │   └── middleware/           # cross‑cutting concerns
+│   │   │   └── middleware/           # cross-cutting concerns
 │   │   ├── scripts/                  # migrations, helpers
 │   │   ├── Dockerfile
 │   │   ├── Makefile
@@ -38,7 +38,7 @@
 ├── infra/                           # IaC: k8s manifests, Terraform
 │   ├── k8s/
 │   └── terraform/
-├── scripts/                         # repo‑wide tooling
+├── scripts/                         # repo-wide tooling
 ├── tests/                           # BDD tests (Gherkin + step defs)
 │   ├── features/                    # .feature files per domain
 │   │   ├── expense-management.feature
@@ -50,5 +50,5 @@
 ├── docker-compose.yml               # local orchestration
 ├── .golangci.yml                    # Go linter config
 ├── pytest.ini                       # Python test config
-├── Makefile                         # high‑level commands (build, test, lint)
+├── Makefile                         # high-level commands (build, test, lint)
 └── README.md                        # project overview & setup
