@@ -15,7 +15,7 @@ flowchart TD
         A2[Login]
         A3[Logout]
         A4[Refresh Token]
-        A5[Get Me (Protected)]
+        A5[Get Me - Protected]
     end
     subgraph AuthService
         B1[Validate Input]
