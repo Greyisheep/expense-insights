@@ -1,5 +1,5 @@
 # Stage 1: Build the application binary
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ RUN apk add --no-cache git make curl netcat-openbsd
 # Check https://github.com/golang-migrate/migrate/releases for the latest version
 ARG MIGRATE_VERSION=v4.17.0
 RUN curl -L https://github.com/golang-migrate/migrate/releases/download/${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz | tar xvz && \
-    mv migrate.linux-amd64 /usr/local/bin/migrate && \
+    mv migrate /usr/local/bin/migrate && \
     chmod +x /usr/local/bin/migrate
 
 # Copy go mod and sum files to leverage Docker cache
@@ -22,7 +22,7 @@ COPY . .
 
 # Build the Go app - static binary, target linux
 # Ensure your main package is in cmd/server
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/main ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/main ./cmd/auth-server
 
 # Stage 2: Create the final lightweight image
 FROM alpine:latest
@@ -42,7 +42,7 @@ COPY --from=builder /usr/local/bin/migrate /usr/local/bin/migrate
 # Copy configuration files, migrations, and entrypoint script
 # Ensure these paths match your project structure
 COPY configs ./configs
-COPY internal/db/migration ./internal/db/migration
+COPY scripts/migrations /scripts/migrations
 COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
 
 # Make scripts executable and set ownership
@@ -55,6 +55,7 @@ USER appuser
 
 # Expose the application port (adjust if your service uses a different port)
 EXPOSE 8080
+EXPOSE 8081
 
 # Set the entrypoint script which handles migrations and starts the app
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]

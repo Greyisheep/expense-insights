@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # Wait for the database to be ready
@@ -12,7 +12,7 @@ echo "PostgreSQL started"
 # Run database migrations
 echo "Running database migrations..."
 # Ensure migrate is installed or available in the container/environment
-migrate -path /app/internal/db/migration -database "postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${SSL_MODE}" -verbose up
+migrate -path /scripts/migrations -database "postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${SSL_MODE}" -verbose up
 
 echo "Migrations finished."
 

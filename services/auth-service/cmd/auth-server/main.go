@@ -17,7 +17,83 @@ import (
 	db_generated "github.com/Greyisheep/expense-insights/auth-service/internal/database/db" // Generated sqlc code
 	"github.com/Greyisheep/expense-insights/auth-service/internal/token"                    // Token service and repository
 	"github.com/Greyisheep/expense-insights/auth-service/internal/user"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0" // Use a specific version
+
+	"github.com/prometheus/client_golang/prometheus/promhttp" // For Prometheus HTTP handler
 )
+
+const (
+	serviceName    = "auth-service"
+	serviceVersion = "0.1.0"
+)
+
+// initTracerProvider initializes Jaeger Exporter and TracerProvider
+func initTracerProvider(cfg *config.Config) (*sdktrace.TracerProvider, error) {
+	exporter, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(cfg.JaegerEndpoint)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create jaeger exporter: %w", err)
+	}
+
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName),
+			semconv.ServiceVersionKey.String(serviceVersion),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resource: %w", err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+		// TODO: Configure sampler based on environment (e.g., AlwaysSample for dev, ParentBased+TraceIDRatio for prod)
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	slog.Info("Jaeger tracer provider initialized.")
+	return tp, nil
+}
+
+// initMeterProvider initializes Prometheus Exporter and MeterProvider
+func initMeterProvider() (*prometheus.Exporter, error) {
+	exporter, err := prometheus.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create prometheus exporter: %w", err)
+	}
+
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName),
+			semconv.ServiceVersionKey.String(serviceVersion),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resource: %w", err)
+	}
+
+	provider := metric.NewMeterProvider(
+		metric.WithReader(exporter),
+		metric.WithResource(res),
+	)
+	otel.SetMeterProvider(provider)
+	slog.Info("Prometheus meter provider initialized.")
+	return exporter, nil
+}
 
 func main() {
 	// Setup structured logger
@@ -71,16 +147,44 @@ func main() {
 	authAPIHandler := authHttp.NewAuthHandler(authSvc, logger, "localhost", false)
 	logger.Info("HTTP Handlers initialized", slog.String("auth_handler", fmt.Sprintf("%T", authAPIHandler)))
 
-	// TODO: Setup OpenTelemetry (tracing, metrics)
+	// === OpenTelemetry Setup ===
+	tp, err := initTracerProvider(cfg)
+	if err != nil {
+		logger.Error("Failed to initialize OpenTelemetry tracer provider", slog.Any("error", err))
+		// Decide if you want to exit or continue without tracing
+		// For now, we log and continue
+	}
+	defer func() {
+		if tp != nil {
+			if err := tp.Shutdown(context.Background()); err != nil {
+				logger.Error("Error shutting down tracer provider", slog.Any("error", err))
+			}
+		}
+	}()
+
+	promExporter, err := initMeterProvider()
+	if err != nil {
+		logger.Error("Failed to initialize OpenTelemetry meter provider", slog.Any("error", err))
+		// Decide if you want to exit or continue without metrics
+	}
+	// Note: Prometheus exporter doesn't require explicit shutdown in the same way as trace provider.
+	// The meter provider itself doesn't have a shutdown method. The exporter might, but typically it's managed by the HTTP server serving its endpoint.
 
 	// === HTTP Server Setup ===
 	mux := http.NewServeMux()
 
-	// Register auth routes
+	// Register auth routes ON THE MUX that will be wrapped
 	authAPIHandler.RegisterRoutes(mux)
 	logger.Info("Authentication routes registered under /api/v1/auth")
 
-	// Basic health check endpoint
+	// Expose Prometheus metrics endpoint ON THE MUX
+	if promExporter != nil { // promExporter is the OTEL prometheus.Exporter, not a handler itself
+		// promhttp.Handler() serves the default registry, which OTEL integrates with.
+		mux.Handle("/metrics", promhttp.Handler())
+		logger.Info("Prometheus metrics endpoint registered at /metrics")
+	}
+
+	// Basic health check endpoint ON THE MUX
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -88,9 +192,16 @@ func main() {
 		logger.InfoContext(r.Context(), "Health check requested")
 	})
 
+	// Now, create the main otel-wrapped handler using the MUX
+	otelWrappedMux := otelhttp.NewHandler(mux, "auth-server-requests",
+		otelhttp.WithTracerProvider(otel.GetTracerProvider()),
+		otelhttp.WithMeterProvider(otel.GetMeterProvider()),
+		otelhttp.WithPropagators(otel.GetTextMapPropagator()),
+	)
+
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.ServerPort),
-		Handler:      mux,
+		Handler:      otelWrappedMux, // Use the otel-wrapped mux
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -114,6 +225,15 @@ func main() {
 	// Create a context with timeout for shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Shutdown Tracer Provider if initialized
+	if tp != nil {
+		if err := tp.Shutdown(ctx); err != nil { // Use the shutdown context
+			logger.Error("Tracer provider shutdown failed", slog.Any("error", err))
+		} else {
+			logger.Info("Tracer provider gracefully stopped")
+		}
+	}
 
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("Server shutdown failed", slog.Any("error", err))

@@ -96,6 +96,37 @@ func mapUserToUserResponse(usr *user.User) *UserResponse {
 	}
 }
 
+// ResponseEnvelope defines the standard response format for all API responses
+type ResponseEnvelope struct {
+	Status  string      `json:"status"`
+	Data    interface{} `json:"data"`
+	Message string      `json:"message"`
+	Code    int         `json:"code"`
+	Errors  []ErrorItem `json:"errors,omitempty"`
+	Meta    *MetaInfo   `json:"meta,omitempty"`
+}
+
+// ErrorItem represents a single error in the response
+type ErrorItem struct {
+	Field   string `json:"field,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// MetaInfo contains optional metadata about the response
+type MetaInfo struct {
+	Timestamp  string      `json:"timestamp"`
+	Pagination *Pagination `json:"pagination,omitempty"`
+}
+
+// Pagination contains pagination information
+type Pagination struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"per_page"`
+	Total      int `json:"total"`
+	TotalPages int `json:"total_pages"`
+}
+
 // === Helper Functions ===
 
 func (h *AuthHandler) setRefreshTokenCookie(w http.ResponseWriter, refreshToken string, expires time.Time) {
@@ -146,7 +177,24 @@ func (h *AuthHandler) respondWithError(ctx context.Context, w http.ResponseWrite
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+
+	errorItem := ErrorItem{
+		Message: message,
+		Code:    "INTERNAL_ERROR", // You might want to map specific error types to specific codes
+	}
+
+	response := ResponseEnvelope{
+		Status:  "error",
+		Data:    nil,
+		Message: message,
+		Code:    code,
+		Errors:  []ErrorItem{errorItem},
+		Meta: &MetaInfo{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 func (h *AuthHandler) respondWithJSON(ctx context.Context, w http.ResponseWriter, code int, payload interface{}) {
@@ -156,8 +204,24 @@ func (h *AuthHandler) respondWithJSON(ctx context.Context, w http.ResponseWriter
 		err := json.NewEncoder(w).Encode(payload)
 		if err != nil {
 			h.logger.ErrorContext(ctx, "Failed to encode JSON response", slog.Any("error", err), slog.Any("payload", payload))
+			// Use the envelope format for the error response
+			errorResponse := ResponseEnvelope{
+				Status:  "error",
+				Data:    nil,
+				Message: "Internal server error",
+				Code:    http.StatusInternalServerError,
+				Errors: []ErrorItem{
+					{
+						Code:    "ENCODING_ERROR",
+						Message: "Failed to encode response",
+					},
+				},
+				Meta: &MetaInfo{
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				},
+			}
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Internal server error"})
+			json.NewEncoder(w).Encode(errorResponse)
 			return
 		}
 	}
@@ -199,10 +263,20 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 
 	h.setRefreshTokenCookie(w, refreshTokenString, refreshTokenExpiry)
 
-	h.respondWithJSON(ctx, w, http.StatusCreated, TokenResponse{
-		User:        mapUserToUserResponse(usr),
-		AccessToken: accessToken,
-	})
+	response := ResponseEnvelope{
+		Status: "success",
+		Data: TokenResponse{
+			User:        mapUserToUserResponse(usr),
+			AccessToken: accessToken,
+		},
+		Message: "User registered successfully",
+		Code:    http.StatusCreated,
+		Meta: &MetaInfo{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	h.respondWithJSON(ctx, w, http.StatusCreated, response)
 }
 
 // HandleLogin is the HTTP handler for user login.
@@ -234,10 +308,20 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	h.setRefreshTokenCookie(w, refreshTokenString, refreshTokenExpiry)
 
-	h.respondWithJSON(ctx, w, http.StatusOK, TokenResponse{
-		User:        mapUserToUserResponse(usr),
-		AccessToken: accessToken,
-	})
+	response := ResponseEnvelope{
+		Status: "success",
+		Data: TokenResponse{
+			User:        mapUserToUserResponse(usr),
+			AccessToken: accessToken,
+		},
+		Message: "User logged in successfully",
+		Code:    http.StatusOK,
+		Meta: &MetaInfo{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	h.respondWithJSON(ctx, w, http.StatusOK, response)
 }
 
 // HandleLogout is the HTTP handler for user logout.
@@ -260,7 +344,16 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.clearRefreshTokenCookie(w)
-	h.respondWithJSON(ctx, w, http.StatusOK, map[string]string{"message": "Logged out successfully"})
+	response := ResponseEnvelope{
+		Status:  "success",
+		Data:    nil,
+		Message: "Logged out successfully",
+		Code:    http.StatusOK,
+		Meta: &MetaInfo{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+	h.respondWithJSON(ctx, w, http.StatusOK, response)
 }
 
 // HandleRefreshToken is the HTTP handler for refreshing tokens.
@@ -285,9 +378,18 @@ func (h *AuthHandler) HandleRefreshToken(w http.ResponseWriter, r *http.Request)
 
 	h.setRefreshTokenCookie(w, newRefreshTokenString, newRefreshTokenExpiry)
 
-	h.respondWithJSON(ctx, w, http.StatusOK, TokenResponse{
-		AccessToken: newAccessToken,
-	})
+	response := ResponseEnvelope{
+		Status: "success",
+		Data: TokenResponse{
+			AccessToken: newAccessToken,
+		},
+		Message: "Token refreshed successfully",
+		Code:    http.StatusOK,
+		Meta: &MetaInfo{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+	h.respondWithJSON(ctx, w, http.StatusOK, response)
 }
 
 // HandleGetMe is the HTTP handler for fetching current user details.
@@ -310,5 +412,14 @@ func (h *AuthHandler) HandleGetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.respondWithJSON(ctx, w, http.StatusOK, mapUserToUserResponse(usr))
+	response := ResponseEnvelope{
+		Status:  "success",
+		Data:    mapUserToUserResponse(usr),
+		Message: "User details retrieved successfully",
+		Code:    http.StatusOK,
+		Meta: &MetaInfo{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+	h.respondWithJSON(ctx, w, http.StatusOK, response)
 }

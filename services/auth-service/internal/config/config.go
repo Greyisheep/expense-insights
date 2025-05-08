@@ -22,6 +22,7 @@ type Config struct {
 	ServerPort         int
 	DBConnectionString string
 	JWT                JWTConfig // Changed from individual JWT fields
+	JaegerEndpoint     string    // Added for OpenTelemetry tracing
 	// Add other config fields like OAuth credentials, etc. here
 }
 
@@ -58,6 +59,7 @@ func LoadConfig() (*Config, error) {
 	cfg := &Config{
 		ServerPort:         port,
 		DBConnectionString: getEnv("AUTH_DB_CONNECTION_STRING", ""), // Require this to be set
+		JaegerEndpoint:     getEnv("AUTH_JAEGER_ENDPOINT", "http://host.docker.internal:14268/api/traces"),
 		JWT: JWTConfig{
 			AccessSecret:  jwtSecret,
 			RefreshSecret: refreshJwtSecret, // TODO: Use a different env var for refresh secret: AUTH_JWT_REFRESH_SECRET
