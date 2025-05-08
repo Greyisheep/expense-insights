@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Greyisheep/expense-insights/auth-service/internal/config"
+	"github.com/Greyisheep/expense-insights/auth-service/internal/database"
 )
 
 func main() {
@@ -28,7 +29,26 @@ func main() {
 	logger.Info("Configuration loaded successfully", slog.Int("port", cfg.ServerPort))
 
 	// === Dependency Injection Setup ===
-	// TODO: Initialize database connection
+
+	// Initialize database connection
+	dbConfig := database.DBConfig{
+		ConnectionString: cfg.DBConnectionString,
+		MaxOpenConns:     25,              // Example value
+		MaxIdleConns:     25,              // Example value
+		ConnMaxLifetime:  5 * time.Minute, // Example value
+	}
+	db, err := database.NewDBConnection(dbConfig)
+	if err != nil {
+		logger.Error("Failed to connect to database", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Error("Failed to close database connection", slog.Any("error", err))
+		}
+	}()
+	logger.Info("Database connection established successfully")
+
 	// TODO: Initialize repositories (user, token, oauth)
 	// TODO: Initialize services (auth service, token service)
 	// TODO: Initialize handlers
