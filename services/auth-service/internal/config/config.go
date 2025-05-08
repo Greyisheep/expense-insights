@@ -7,13 +7,21 @@ import (
 	"time"
 )
 
+// JWTConfig holds the JWT specific configurations.
+// It is populated from environment variables.
+type JWTConfig struct {
+	AccessSecret  string
+	RefreshSecret string // TODO: Consider using a separate secret for refresh tokens
+	AccessTTL     time.Duration
+	RefreshTTL    time.Duration
+	Issuer        string
+}
+
 // Config holds the application configuration.
 type Config struct {
 	ServerPort         int
 	DBConnectionString string
-	JWTSecret          string
-	AccessTokenTTL     time.Duration
-	RefreshTokenTTL    time.Duration
+	JWT                JWTConfig // Changed from individual JWT fields
 	// Add other config fields like OAuth credentials, etc. here
 }
 
@@ -37,19 +45,30 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid refresh token TTL format: %w", err)
 	}
 
+	jwtSecret := getEnv("JWT_SECRET", "")
+	if jwtSecret == "" {
+		return nil, fmt.Errorf("environment variable JWT_SECRET must be set")
+	}
+
+	refreshJwtSecret := getEnv("REFRESH_SECRET", "")
+	if refreshJwtSecret == "" {
+		return nil, fmt.Errorf("environment variable REFRESH_SECRET must be set")
+	}
+
 	cfg := &Config{
 		ServerPort:         port,
 		DBConnectionString: getEnv("AUTH_DB_CONNECTION_STRING", ""), // Require this to be set
-		JWTSecret:          getEnv("AUTH_JWT_SECRET", ""),           // Require this to be set
-		AccessTokenTTL:     time.Duration(accessTokenTTLMinutes) * time.Minute,
-		RefreshTokenTTL:    time.Duration(refreshTokenTTLHours) * time.Hour,
+		JWT: JWTConfig{
+			AccessSecret:  jwtSecret,
+			RefreshSecret: refreshJwtSecret, // TODO: Use a different env var for refresh secret: AUTH_JWT_REFRESH_SECRET
+			AccessTTL:     time.Duration(accessTokenTTLMinutes) * time.Minute,
+			RefreshTTL:    time.Duration(refreshTokenTTLHours) * time.Hour,
+			Issuer:        getEnv("AUTH_JWT_ISSUER", "expense-insights-auth"),
+		},
 	}
 
 	if cfg.DBConnectionString == "" {
 		return nil, fmt.Errorf("environment variable AUTH_DB_CONNECTION_STRING must be set")
-	}
-	if cfg.JWTSecret == "" {
-		return nil, fmt.Errorf("environment variable AUTH_JWT_SECRET must be set")
 	}
 
 	return cfg, nil

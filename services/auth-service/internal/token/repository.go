@@ -52,7 +52,7 @@ func mapDBRefreshTokenToToken(dbToken db.RefreshToken) *RefreshToken {
 	rt := &RefreshToken{
 		ID:        dbToken.ID,
 		UserID:    dbToken.UserID,
-		TokenHash: dbToken.TokenHash, // Correctly maps to the new TokenHash field
+		TokenHash: dbToken.TokenHash,
 		ExpiresAt: dbToken.ExpiresAt,
 		// ReplacedBy is already uuid.NullUUID in both structs, so direct assignment is fine.
 		ReplacedBy: dbToken.ReplacedBy,

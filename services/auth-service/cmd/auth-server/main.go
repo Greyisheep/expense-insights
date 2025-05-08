@@ -10,10 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	authHttp "github.com/Greyisheep/expense-insights/auth-service/internal/api/http" // Auth HTTP Handler
+	"github.com/Greyisheep/expense-insights/auth-service/internal/auth"
 	"github.com/Greyisheep/expense-insights/auth-service/internal/config"
 	"github.com/Greyisheep/expense-insights/auth-service/internal/database"
 	db_generated "github.com/Greyisheep/expense-insights/auth-service/internal/database/db" // Generated sqlc code
-	"github.com/Greyisheep/expense-insights/auth-service/internal/token"                    // Added token import
+	"github.com/Greyisheep/expense-insights/auth-service/internal/token"                    // Token service and repository
 	"github.com/Greyisheep/expense-insights/auth-service/internal/user"
 )
 
@@ -29,16 +31,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.Info("Configuration loaded successfully", slog.Int("port", cfg.ServerPort))
+	logger.Info("Configuration loaded successfully", slog.Int("port", cfg.ServerPort), slog.String("jwt_issuer", cfg.JWT.Issuer))
 
 	// === Dependency Injection Setup ===
 
 	// Initialize database connection
 	dbConfig := database.DBConfig{
 		ConnectionString: cfg.DBConnectionString,
-		MaxOpenConns:     25,              // Example value
-		MaxIdleConns:     25,              // Example value
-		ConnMaxLifetime:  5 * time.Minute, // Example value
+		MaxOpenConns:     25,
+		MaxIdleConns:     25,
+		ConnMaxLifetime:  5 * time.Minute,
 	}
 	db, err := database.NewDBConnection(dbConfig)
 	if err != nil {
@@ -55,34 +57,40 @@ func main() {
 	// Initialize repositories
 	queries := db_generated.New(db)
 	userRepo := user.NewSQLCUserRepository(queries)
-	tokenRepo := token.NewSQLCTokenRepository(queries) // Initialize token repository
-	// TODO: Initialize oauth repository (if/when implemented)
+	tokenRepo := token.NewSQLCTokenRepository(queries)
+	logger.Info("Repositories initialized", slog.String("user_repo", fmt.Sprintf("%T", userRepo)), slog.String("token_repo", fmt.Sprintf("%T", tokenRepo)))
 
-	// Use userRepo for example (this is just a placeholder, actual use will be in services)
-	logger.Info("User repository initialized", slog.Any("repo_type", fmt.Sprintf("%T", userRepo)))
-	logger.Info("Token repository initialized", slog.Any("repo_type", fmt.Sprintf("%T", tokenRepo))) // Log token repo init
+	// Initialize services
+	tokenSvc := token.NewService(&cfg.JWT, tokenRepo, logger) // Pass JWTConfig part of cfg
+	authSvc := auth.NewService(userRepo, tokenRepo, tokenSvc, logger)
+	logger.Info("Services initialized", slog.String("token_service", fmt.Sprintf("%T", tokenSvc)), slog.String("auth_service", fmt.Sprintf("%T", authSvc)))
 
-	// TODO: Initialize services (auth service, token service)
-	// TODO: Initialize handlers
+	// Initialize handlers
+	// TODO: Make cookie domain and secure flag configurable (e.g., from cfg)
+	// For now, using localhost and http for local dev. In prod, this must be your actual domain and true.
+	authAPIHandler := authHttp.NewAuthHandler(authSvc, logger, "localhost", false)
+	logger.Info("HTTP Handlers initialized", slog.String("auth_handler", fmt.Sprintf("%T", authAPIHandler)))
+
 	// TODO: Setup OpenTelemetry (tracing, metrics)
 
 	// === HTTP Server Setup ===
 	mux := http.NewServeMux()
 
+	// Register auth routes
+	authAPIHandler.RegisterRoutes(mux)
+	logger.Info("Authentication routes registered under /api/v1/auth")
+
 	// Basic health check endpoint
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		// In a real app, check DB connection, etc.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, `{"status":"ok"}`)
 		logger.InfoContext(r.Context(), "Health check requested")
 	})
 
-	// TODO: Add authentication routes (/api/v1/auth/...)
-
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.ServerPort),
-		Handler:      mux, // Later, wrap with middleware for logging, tracing, etc.
+		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
