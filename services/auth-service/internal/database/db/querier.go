@@ -11,9 +11,17 @@ import (
 )
 
 type Querier interface {
+	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteExpiredRefreshTokens(ctx context.Context) (int64, error)
+	DeleteRefreshTokensByUserID(ctx context.Context, userID uuid.UUID) (int64, error)
+	GetRefreshTokenByID(ctx context.Context, id uuid.UUID) (RefreshToken, error)
+	GetRefreshTokenByToken(ctx context.Context, tokenHash string) (RefreshToken, error)
+	GetRefreshTokensByUserID(ctx context.Context, userID uuid.UUID) ([]RefreshToken, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	RevokeRefreshToken(ctx context.Context, id uuid.UUID) error
+	SetRefreshTokenReplacedBy(ctx context.Context, arg SetRefreshTokenReplacedByParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 }
 

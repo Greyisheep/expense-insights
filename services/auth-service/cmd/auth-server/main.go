@@ -12,6 +12,9 @@ import (
 
 	"github.com/Greyisheep/expense-insights/auth-service/internal/config"
 	"github.com/Greyisheep/expense-insights/auth-service/internal/database"
+	db_generated "github.com/Greyisheep/expense-insights/auth-service/internal/database/db" // Generated sqlc code
+	"github.com/Greyisheep/expense-insights/auth-service/internal/token"                    // Added token import
+	"github.com/Greyisheep/expense-insights/auth-service/internal/user"
 )
 
 func main() {
@@ -49,7 +52,16 @@ func main() {
 	}()
 	logger.Info("Database connection established successfully")
 
-	// TODO: Initialize repositories (user, token, oauth)
+	// Initialize repositories
+	queries := db_generated.New(db)
+	userRepo := user.NewSQLCUserRepository(queries)
+	tokenRepo := token.NewSQLCTokenRepository(queries) // Initialize token repository
+	// TODO: Initialize oauth repository (if/when implemented)
+
+	// Use userRepo for example (this is just a placeholder, actual use will be in services)
+	logger.Info("User repository initialized", slog.Any("repo_type", fmt.Sprintf("%T", userRepo)))
+	logger.Info("Token repository initialized", slog.Any("repo_type", fmt.Sprintf("%T", tokenRepo))) // Log token repo init
+
 	// TODO: Initialize services (auth service, token service)
 	// TODO: Initialize handlers
 	// TODO: Setup OpenTelemetry (tracing, metrics)

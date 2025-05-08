@@ -11,6 +11,29 @@ import (
 	"github.com/google/uuid"
 )
 
+type OauthAccount struct {
+	ID             uuid.UUID      `json:"id"`
+	UserID         uuid.UUID      `json:"user_id"`
+	Provider       string         `json:"provider"`
+	ProviderUserID string         `json:"provider_user_id"`
+	AccessToken    sql.NullString `json:"access_token"`
+	RefreshToken   sql.NullString `json:"refresh_token"`
+	ExpiresAt      sql.NullTime   `json:"expires_at"`
+	CreatedAt      sql.NullTime   `json:"created_at"`
+	UpdatedAt      sql.NullTime   `json:"updated_at"`
+}
+
+type RefreshToken struct {
+	ID         uuid.UUID     `json:"id"`
+	UserID     uuid.UUID     `json:"user_id"`
+	TokenHash  string        `json:"token_hash"`
+	ExpiresAt  time.Time     `json:"expires_at"`
+	CreatedAt  sql.NullTime  `json:"created_at"`
+	UpdatedAt  sql.NullTime  `json:"updated_at"`
+	Revoked    sql.NullBool  `json:"revoked"`
+	ReplacedBy uuid.NullUUID `json:"replaced_by"`
+}
+
 // User accounts with authentication details and profile information
 type User struct {
 	ID           uuid.UUID      `json:"id"`
