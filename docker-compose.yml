@@ -1,0 +1,48 @@
+services:
+  postgres-auth:
+    image: postgres:15-alpine # Use a specific version
+    container_name: expense_insights_postgres_auth
+    environment:
+
+      POSTGRES_DB: auth_db
+    ports:
+      - "127.0.0.1:5433:5432" 
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data 
+    networks:
+      - expense-insights-net
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: expense_insights_auth_service
+    ports:
+      - "127.0.0.1:8080:8080" # Expose APP_PORT (default 8080)
+    environment:
+      # These will be sourced from the root .env file or overridden by services/auth-service/.env if used with env_file
+      # For the entrypoint script
+      DB_HOST: postgres-auth
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER} # From root .env
+      DB_PASSWORD: ${POSTGRES_PASSWORD} # From root .env
+      DB_NAME: auth_db
+      SSL_MODE: disable # Or as configured
+      APP_PORT: 8080
+      LOG_LEVEL: debug
+      # JWT_SECRET: ${JWT_SECRET} # If you define this in root .env
+    depends_on:
+      - postgres-auth
+    networks:
+      - expense-insights-net
+    # Optionally, to load variables from service-specific .env:
+    env_file:
+      - ./services/auth-service/.env
+
+volumes:
+  postgres_auth_data:
+    driver: local
+
+networks:
+  expense-insights-net:
+    driver: bridge
