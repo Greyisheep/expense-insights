@@ -1,0 +1,58 @@
+discovery.docker "containers" {
+	host             = "unix:///var/run/docker.sock"
+	refresh_interval = "5s"
+}
+
+discovery.relabel "containers" {
+	targets = []
+
+	rule {
+		target_label = "app"
+		replacement  = "expense-insights"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "instance"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_id"]
+		target_label  = "container_id"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_service"]
+		regex         = "(.+)"
+		target_label  = "job"
+		replacement   = "${1}"
+	}
+
+	rule {
+		source_labels = ["job"]
+		regex         = "^$"
+		target_label  = "job"
+		replacement   = "docker-logs"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		target_label  = "container_name"
+	}
+}
+
+loki.source.docker "containers" {
+	host             = "unix:///var/run/docker.sock"
+	targets          = discovery.docker.containers.targets
+	forward_to       = [loki.write.default.receiver]
+	relabel_rules    = discovery.relabel.containers.rules
+	refresh_interval = "5s"
+}
+
+loki.write "default" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+	external_labels = {}
+}
