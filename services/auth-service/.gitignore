@@ -23,4 +23,6 @@ go.work.sum
 
 # env file
 .env
+services/auth-service/.env
 cookie-jar.txt
+.qodo

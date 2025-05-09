@@ -1,6 +1,6 @@
 services:
   postgres-auth:
-    image: postgres:15-alpine # Use a specific version
+    image: postgres:17-alpine # Use a specific version
     container_name: expense_insights_postgres_auth
     environment:
       POSTGRES_USER: auth_user
@@ -99,17 +99,23 @@ services:
       - expense-insights-net
     restart: unless-stopped
 
-  promtail:
-    image: grafana/promtail:2.9.5 # Use a recent version
-    container_name: expense_insights_promtail
+  alloy:
+    image: grafana/alloy:latest # Or a specific version like grafana/alloy:v1.8.0
+    container_name: expense_insights_alloy
     volumes:
-      - ./observability/promtail/promtail-config.yml:/etc/promtail/config.yml
-      - /var/log:/var/log:ro # If reading host logs
-      # Mount Docker socket to discover container logs
+      - ./observability/alloy/alloy-config.river:/etc/alloy/config.river
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # If your containers write logs to specific paths that Promtail needs to access from the host:
-      # - /path/to/your/app/logs:/mnt/logs/app:ro
-    command: -config.file=/etc/promtail/config.yml
+      # The Alloy data directory for positions, WAL, etc.
+      - alloy_data:/var/lib/alloy/data 
+    command:
+      - "run"
+      - "/etc/alloy/config.river"
+      # Expose the UI (optional but useful for debugging)
+      - "--server.http.listen-addr=0.0.0.0:12345" 
+      - "--storage.path=/var/lib/alloy/data"
+    ports:
+      # Expose Alloy UI (optional)
+      - "127.0.0.1:12345:12345" 
     networks:
       - expense-insights-net
     restart: unless-stopped
@@ -145,6 +151,7 @@ volumes:
   prometheus_data: {}
   grafana_data: {}
   loki_data: {}
+  alloy_data: {}
 
 networks:
   expense-insights-net:

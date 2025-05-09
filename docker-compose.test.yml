@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   postgres-auth-test:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: expense_insights_postgres_auth_test
     environment:
       POSTGRES_USER: auth_test_user
