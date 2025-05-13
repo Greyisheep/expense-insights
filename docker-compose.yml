@@ -1,0 +1,158 @@
+services:
+  postgres-auth:
+    image: postgres:17-alpine # Use a specific version
+    container_name: expense_insights_postgres_auth
+    environment:
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: hee_haww
+      POSTGRES_DB: auth_db
+    ports:
+      - "127.0.0.1:5433:5432" 
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data 
+    networks:
+      - expense-insights-net
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: expense_insights_auth_service
+    ports:
+      - "127.0.0.1:8081:8080" # Host port changed to 8081
+    environment:
+      # These will be sourced from the root .env file or overridden by services/auth-service/.env if used with env_file
+      # For the entrypoint script
+      DB_HOST: postgres-auth
+      DB_PORT: 5432
+      DB_USER: auth_user
+      DB_PASSWORD: hee_haww
+      DB_NAME: auth_db
+      SSL_MODE: disable # Or as configured
+      APP_PORT: 8080
+      LOG_LEVEL: debug
+      # JWT_SECRET: ${JWT_SECRET} # If you define this in root .env
+      AUTH_JWT_ISSUER: "expense-insights-auth"
+      AUTH_ACCESS_TOKEN_TTL_MINUTES: 15
+      AUTH_REFRESH_TOKEN_TTL_HOURS: 168
+      AUTH_DB_CONNECTION_STRING: "postgresql://auth_user:hee_haww@postgres-auth:5432/auth_db?sslmode=disable"
+      # OTel Configuration
+      OTEL_EXPORTER_JAEGER_ENDPOINT: "http://jaeger:14268/api/traces" # Added for potential future use in code
+      OTEL_SERVICE_NAME: "auth-service"
+    depends_on:
+      - postgres-auth
+    networks:
+      - expense-insights-net
+    # Optionally, to load variables from service-specific .env:
+    env_file:
+      - ./services/auth-service/.env
+    restart: unless-stopped
+    # For Promtail to access logs if not using journald or syslog
+    labels:
+      logging: "promtail"
+      service: "auth-service"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.68.0 # Use a recent version
+    container_name: expense_insights_jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14268:14268" # Collector (HTTP)
+      - "14250:14250" # Collector (gRPC)
+    networks:
+      - expense-insights-net
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true # If you plan to send OTLP directly
+
+  prometheus:
+    image: prom/prometheus:v3.3.0 # Use a recent version
+    container_name: expense_insights_prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle' # Allows hot-reloading of config via POST to /-/reload
+    networks:
+      - expense-insights-net
+    restart: unless-stopped
+    depends_on:
+      - auth-service # Ensure auth-service is up for scraping
+
+  loki:
+    image: grafana/loki:2.9.5 # Use a recent version
+    container_name: expense_insights_loki
+    ports:
+      - "127.0.0.1:3100:3100" # Loki API
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/config.yml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/config.yml
+    networks:
+      - expense-insights-net
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:latest # Or a specific version like grafana/alloy:v1.8.0
+    container_name: expense_insights_alloy
+    volumes:
+      - ./observability/alloy/alloy-config.river:/etc/alloy/config.river
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # The Alloy data directory for positions, WAL, etc.
+      - alloy_data:/var/lib/alloy/data 
+    command:
+      - "run"
+      - "/etc/alloy/config.river"
+      # Expose the UI (optional but useful for debugging)
+      - "--server.http.listen-addr=0.0.0.0:12345" 
+      - "--storage.path=/var/lib/alloy/data"
+    ports:
+      # Expose Alloy UI (optional)
+      - "127.0.0.1:12345:12345" 
+    networks:
+      - expense-insights-net
+    restart: unless-stopped
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:12.0.0 # Use a recent version
+    container_name: expense_insights_grafana
+    ports:
+      - "127.0.0.1:3000:3000" # Grafana UI
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning/:/etc/grafana/provisioning/
+      # If you have custom dashboards:
+      # - ./observability/grafana/dashboards/:/var/lib/grafana/dashboards/
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # GF_LOG_LEVEL: debug # For debugging Grafana
+    networks:
+      - expense-insights-net
+    restart: unless-stopped
+
+volumes:
+  postgres_auth_data:
+    driver: local
+  prometheus_data: {}
+  grafana_data: {}
+  loki_data: {}
+  alloy_data: {}
+
+networks:
+  expense-insights-net:
+    driver: bridge

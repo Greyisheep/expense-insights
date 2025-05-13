@@ -1,0 +1,34 @@
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+
+  storage_config:
+    # Recommended TSDB index (Loki ≥2.8)
+    tsdb:
+      directory: /loki/tsdb
+    filesystem:
+      directory: /loki/chunks
+
+  ring:
+    replication_factor: 1
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  alertmanager_url: http://localhost:9093 # Not used in this basic setup 
