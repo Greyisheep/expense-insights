@@ -7,23 +7,19 @@ server:
 common:
   instance_addr: 127.0.0.1
   path_prefix: /loki
-
-  storage_config:
-    # Recommended TSDB index (Loki ≥2.8)
-    tsdb:
-      directory: /loki/tsdb
+  storage:
     filesystem:
-      directory: /loki/chunks
-
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
   ring:
-    replication_factor: 1
     kvstore:
       store: inmemory
 
 schema_config:
   configs:
     - from: 2020-10-24
-      store: tsdb
+      store: boltdb-shipper
       object_store: filesystem
       schema: v11
       index:
