@@ -3,11 +3,18 @@ package main
 import (
 	"context"
 	// "fmt" // Removed as it's not used yet
-	"log/slog"
+	"log/slog" // Added for server
+	// Added for server & other HTTP utilities
 	"os"
 	"os/signal"
+
+	// Corrected import path for the config package
 	"syscall"
-	// "services/efms-service/internal/config" // Placeholder for config package
+	"time" // Added for shutdown timeout
+
+	"github.com/Greyisheep/expense-insights/efms-service/internal/config"
+
+	"github.com/jackc/pgx/v5/pgxpool" // Added for database connection
 )
 
 func main() {
@@ -19,14 +26,27 @@ func main() {
 
 	slog.Info("Starting EFMS service...")
 
-	// TODO: Load configuration (e.g., config.LoadConfig())
-	// cfg, err := config.LoadConfig()
-	// if err != nil {
-	// 	slog.Error("Failed to load configuration", slog.Any("error", err))
-	// 	os.Exit(1)
-	// }
+	// Load configuration
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		slog.Error("Failed to load configuration", slog.Any("error", err))
+		os.Exit(1)
+	}
 
-	// TODO: Initialize database connection (e.g., using pgx)
+	// Initialize database connection
+	dbpool, err := pgxpool.New(context.Background(), cfg.DBConnectionString)
+	if err != nil {
+		slog.Error("Unable to create connection pool", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer dbpool.Close()
+
+	// Ping the database
+	if err := dbpool.Ping(context.Background()); err != nil {
+		slog.Error("Unable to ping database", slog.Any("error", err))
+		os.Exit(1)
+	}
+	slog.Info("Successfully connected to the database.")
 
 	// TODO: Initialize S3/MinIO client
 
@@ -48,11 +68,22 @@ func main() {
 	slog.Info("EFMS service running. Press Ctrl+C to exit.")
 	<-ctx.Done() // Wait for interrupt signal
 
-	stop() // Ensure context is cancelled to release resources
+	stop() // Ensure context is cancelled to release resources if any operation was using it.
 	slog.Info("Shutting down EFMS service...")
 
-	// TODO: Add graceful shutdown for server, db connections, nats, etc.
+	// Add graceful shutdown for server, db connections, nats, etc.
 	// For example, server.Shutdown(context.Background())
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+
+	// Close database pool
+	slog.Info("Closing database connections...")
+	dbpool.Close() // Called again here to ensure it's part of controlled shutdown, defer is for panics/unexpected exits
+
+	// TODO: Gracefully shutdown HTTP server
+	// Example: if err := httpServer.Shutdown(shutdownCtx); err != nil {
+	// slog.Error("HTTP server shutdown error", slog.Any("error", err))
+	// }
 
 	slog.Info("EFMS service stopped gracefully.")
 }

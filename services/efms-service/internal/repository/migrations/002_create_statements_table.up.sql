@@ -20,8 +20,9 @@ CREATE TABLE IF NOT EXISTS statements (
     error_message TEXT,
     insights_available BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    -- updated_by UUID, -- From spec, FK to users. EFMS might not own updating this directly.
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by UUID, -- Uncommented
+    CONSTRAINT fk_statements_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) -- Added FK constraint
 );
 
 CREATE INDEX IF NOT EXISTS idx_statements_user_id ON statements(user_id);
