@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Greyisheep/expense-insights/auth-service/internal/api/middleware"
@@ -28,17 +29,41 @@ type AuthHandler struct {
 	cookieDomain string
 	cookieSecure bool
 	cookiePath   string
+
+	// Pools for object reuse
+	envelopePool sync.Pool
+	bufferPool   sync.Pool
 }
 
 // NewAuthHandler creates a new AuthHandler instance.
 func NewAuthHandler(authService auth.Service, logger *slog.Logger, domain string, secure bool) *AuthHandler {
-	return &AuthHandler{
+	h := &AuthHandler{
 		authService:  authService,
 		logger:       logger.With(slog.String("handler", "auth_http")),
 		cookieDomain: domain,
 		cookieSecure: secure,
 		cookiePath:   "/api/v1/auth",
 	}
+
+	// Initialize pools
+	h.envelopePool = sync.Pool{
+		New: func() interface{} {
+			return &ResponseEnvelope{
+				Errors: make([]ErrorItem, 0, 1), // Preallocate with capacity 1
+				Meta: &MetaInfo{
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				},
+			}
+		},
+	}
+
+	h.bufferPool = sync.Pool{
+		New: func() interface{} {
+			return new(strings.Builder)
+		},
+	}
+
+	return h
 }
 
 // RegisterRoutes registers the authentication routes with the given mux.
@@ -178,53 +203,83 @@ func (h *AuthHandler) respondWithError(ctx context.Context, w http.ResponseWrite
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 
-	errorItem := ErrorItem{
+	// Get envelope from pool
+	response := h.envelopePool.Get().(*ResponseEnvelope)
+	defer h.envelopePool.Put(response)
+
+	// Reset the envelope
+	response.Status = "error"
+	response.Data = nil
+	response.Message = message
+	response.Code = code
+	response.Errors = response.Errors[:0] // Clear slice but keep capacity
+	response.Meta.Timestamp = time.Now().UTC().Format(time.RFC3339)
+
+	// Add error
+	response.Errors = append(response.Errors, ErrorItem{
 		Message: message,
-		Code:    "INTERNAL_ERROR", // You might want to map specific error types to specific codes
+		Code:    "INTERNAL_ERROR",
+	})
+
+	// Get buffer from pool
+	buf := h.bufferPool.Get().(*strings.Builder)
+	defer h.bufferPool.Put(buf)
+	buf.Reset()
+
+	// Encode to buffer
+	encoder := json.NewEncoder(buf)
+	if err := encoder.Encode(response); err != nil {
+		h.logger.ErrorContext(ctx, "Failed to encode error response", slog.Any("error", err))
+		return
 	}
 
-	response := ResponseEnvelope{
-		Status:  "error",
-		Data:    nil,
-		Message: message,
-		Code:    code,
-		Errors:  []ErrorItem{errorItem},
-		Meta: &MetaInfo{
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		},
-	}
-
-	json.NewEncoder(w).Encode(response)
+	// Write buffer to response
+	w.Write([]byte(buf.String()))
 }
 
 func (h *AuthHandler) respondWithJSON(ctx context.Context, w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
+
 	if payload != nil {
-		err := json.NewEncoder(w).Encode(payload)
-		if err != nil {
+		// Get buffer from pool
+		buf := h.bufferPool.Get().(*strings.Builder)
+		defer h.bufferPool.Put(buf)
+		buf.Reset()
+
+		// Encode to buffer
+		encoder := json.NewEncoder(buf)
+		if err := encoder.Encode(payload); err != nil {
 			h.logger.ErrorContext(ctx, "Failed to encode JSON response", slog.Any("error", err), slog.Any("payload", payload))
-			// Use the envelope format for the error response
-			errorResponse := ResponseEnvelope{
-				Status:  "error",
-				Data:    nil,
-				Message: "Internal server error",
-				Code:    http.StatusInternalServerError,
-				Errors: []ErrorItem{
-					{
-						Code:    "ENCODING_ERROR",
-						Message: "Failed to encode response",
-					},
-				},
-				Meta: &MetaInfo{
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-				},
-			}
+
+			// Get envelope from pool for error response
+			errorResponse := h.envelopePool.Get().(*ResponseEnvelope)
+			defer h.envelopePool.Put(errorResponse)
+
+			// Reset the envelope
+			errorResponse.Status = "error"
+			errorResponse.Data = nil
+			errorResponse.Message = "Internal server error"
+			errorResponse.Code = http.StatusInternalServerError
+			errorResponse.Errors = errorResponse.Errors[:0]
+			errorResponse.Meta.Timestamp = time.Now().UTC().Format(time.RFC3339)
+
+			// Add error
+			errorResponse.Errors = append(errorResponse.Errors, ErrorItem{
+				Code:    "ENCODING_ERROR",
+				Message: "Failed to encode response",
+			})
+
+			// Write error response
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(errorResponse)
 			return
 		}
+
+		// Write buffer to response
+		w.Write([]byte(buf.String()))
 	}
+
 	h.logger.InfoContext(ctx, "HTTP request processed successfully", slog.Int("status_code", code))
 }
 

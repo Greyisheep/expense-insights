@@ -1,0 +1,19 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    # Path to schema migration files
+    schema: "internal/repository/migrations/"
+    # Path to SQL query files
+    queries: "internal/repository/queries/"
+    gen:
+      go:
+        # Output path for generated Go code
+        out: "internal/repository/sqlc"
+        # Package name for the generated code
+        package: "sqlc"
+        # Options for generated code
+        emit_json_tags: true              # For easy JSON marshalling of db models
+        emit_prepared_queries: true    # Use prepared queries for performance
+        emit_interface: true              # Generate an interface for mockability
+        emit_exact_table_names: false     # User plural names for tables in generated code (e.g. Users)
+        emit_empty_slices: true           # Initialize empty slices instead of nil 
